@@ -134,7 +134,7 @@ class RAGService:
         emb_preview = embedder.get_embedding_preview(query_vector)
         pipeline_steps.append({
             "etapa": "EMBEDDING",
-            "descricao": "Geração do vetor numérico de 384 dimensões via FastEmbed (BAAI/bge-small-en-v1.5)",
+            "descricao": f"Geração do vetor numérico de {embedder.dimension} dimensões via FastEmbed ({embedder.model_name})",
             "detalhes": emb_preview,
             "tempo_ms": round((time.time() - t1) * 1000, 2)
         })
@@ -225,14 +225,16 @@ class RAGService:
 
         pipeline_steps.append({
             "etapa": "LLM_OPENROUTER",
-            "descricao": f"Geração da resposta final via OpenRouter (modelo: {settings.OPENROUTER_MODEL})",
+            "descricao": f"Geração da resposta final via OpenRouter (modelo: {resposta_llm['modelo']})",
             "tempo_ms": llm_time_ms
         })
 
         return {
             "pergunta": question,
             "status": "SUCESSO",
-            "resposta": resposta_llm,
+            "resposta": resposta_llm["texto"],
+            "modelo_usado": resposta_llm["modelo"],
+            "uso_tokens": resposta_llm["uso_tokens"],
             "candidatos": candidatos,
             "candidatos_relevantes": candidatos_relevantes,
             "prompt_aumentado": prompt_aumentado,
@@ -243,7 +245,7 @@ class RAGService:
         }
 
     @staticmethod
-    def _call_openrouter(system_prompt: str, context: str, user_question: str) -> str:
+    def _call_openrouter(system_prompt: str, context: str, user_question: str) -> Dict[str, Any]:
         """Comunicação segura com a API do OpenRouter"""
         if not settings.OPENROUTER_API_KEY:
             raise ValueError("OPENROUTER_API_KEY não configurada no .env")
@@ -275,9 +277,13 @@ class RAGService:
                 data = resp.json()
                 choices = data.get("choices", [])
                 if choices:
-                    return choices[0].get("message", {}).get("content", "").strip()
-                return "Sem resposta gerada pelo modelo."
+                    return {
+                        "texto": (choices[0].get("message", {}).get("content") or "").strip(),
+                        "modelo": data.get("model", settings.OPENROUTER_MODEL),
+                        "uso_tokens": {key: data.get("usage", {}).get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
+                    }
+                raise ValueError("OpenRouter não retornou uma resposta.")
             else:
-                return f"Erro na chamada OpenRouter (status {resp.status_code})"
+                raise ValueError(f"Erro na chamada OpenRouter (status {resp.status_code})")
 
 rag_service = RAGService()

@@ -122,7 +122,7 @@ Os seguintes arquivos serão gerados:
 
 ## 🚀 Como Executar o Projeto
 
-Recomenda-se abrir dois terminais:
+Abra dois terminais na raiz do projeto. Ative o ambiente virtual Python no terminal do backend.
 
 ### Terminal 1 — Iniciar o Backend (FastAPI)
 Com o `venv` ativado:
@@ -136,12 +136,10 @@ A API estará disponível em:
 ### Terminal 2 — Iniciar o Frontend (Next.js)
 Navegue até a pasta `frontend` e instale as dependências (se for a primeira vez):
 ```bash
-cd frontend
-npm install
-npm run dev
+cd frontend && npm run dev
 ```
-Acesse a aplicação no seu navegador:
-👉 **[http://localhost:3000](http://localhost:3000)**
+
+Se esta for a primeira execução do frontend, instale antes suas dependências, dentro de `frontend`, com `npm install`. Depois que os dois terminais estiverem rodando, acesse **[http://localhost:3000](http://localhost:3000)**.
 
 ---
 
@@ -198,3 +196,12 @@ rag/
     ├── package.json
     └── next.config.ts         # Configuração de rewrites para a API
 ```
+
+
+## Frontend restaurado
+
+Na pasta `frontend`, execute `npm install` e `npm run dev`. Acesse http://127.0.0.1:3000. O Next.js encaminha `/api/*` ao backend em http://127.0.0.1:8000. Para outro endereço, configure `BACKEND_URL` no ambiente do processo Next.js. Nenhuma chave Supabase ou OpenRouter é enviada ao navegador.
+
+O chat consulta `POST /api/query` com `pergunta`, `top_k` e `min_threshold`. Cada consulta é independente: o histórico visual não é memória conversacional. A inspeção mostra trechos recuperados, IDs, metadados, scores, prompt aumentado e tempos medidos pelo backend após a conclusão. A tokenização tiktoken é didática e independente da tokenização interna do FastEmbed e do modelo de geração. Os tokens de entrada, saída e total são retornados pelo OpenRouter; campos ausentes aparecem como não informados. A API também retorna o modelo efetivamente utilizado.
+
+A ingestão usa `POST /api/ingest`. A tela consulta os nomes dos documentos e a quantidade de chunks associados no Supabase; exibe apenas PDFs locais ainda sem chunks e informa o total de documentos e chunks vetorizados. O botão para ingerir todos também respeita esse filtro. A identificação usa o nome do arquivo: substituir o conteúdo mantendo o mesmo nome não dispara nova ingestão automaticamente. O extrator atual lê texto de PDFs, sem OCR de páginas escaneadas. O projeto deve permanecer local para esta prática; suas rotas de ingestão e exclusão não possuem autenticação.

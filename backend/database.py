@@ -32,6 +32,31 @@ class SupabaseManager:
         res = self.client.table("documentos").select("*").order("criado_em", desc=True).execute()
         return res.data or []
 
+    def get_ingestion_summary(self) -> Dict[str, Any]:
+        """Conta documentos com chunks gravados e o total de vetores no índice."""
+        documents = self.client.table("documentos").select("id,nome_arquivo").execute().data or []
+        indexed_names = set()
+        total_chunks = 0
+
+        # Fazemos contagens pequenas, sem baixar os vetores do Supabase.
+        for document in documents:
+            result = (
+                self.client.table("documento_chunks")
+                .select("id", count="exact", head=True)
+                .eq("documento_id", document["id"])
+                .execute()
+            )
+            chunk_count = result.count or 0
+            if chunk_count:
+                indexed_names.add(document["nome_arquivo"])
+                total_chunks += chunk_count
+
+        return {
+            "arquivos_indexados": sorted(indexed_names),
+            "total_documentos_vetorizados": len(indexed_names),
+            "total_chunks_vetorizados": total_chunks,
+        }
+
     def delete_documento(self, doc_id: str):
         # Chunks são apagados ou referenciados
         self.client.table("documento_chunks").delete().eq("documento_id", doc_id).execute()

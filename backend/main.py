@@ -2,7 +2,7 @@ import os
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.config import settings
 from backend.database import db
@@ -24,8 +24,8 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     pergunta: str
-    top_k: Optional[int] = 5
-    min_threshold: Optional[float] = 0.35
+    top_k: int = Field(default=5, ge=1, le=20)
+    min_threshold: float = Field(default=0.35, ge=0, le=1)
 
 class IngestRequest(BaseModel):
     filename: Optional[str] = None
@@ -47,10 +47,27 @@ def get_status():
 
 @app.get("/api/available-files")
 def list_available_files():
-    if not os.path.exists(settings.DOCS_DIR):
-        return {"files": []}
-    files = [f for f in os.listdir(settings.DOCS_DIR) if f.lower().endswith(".pdf")]
-    return {"files": sorted(files)}
+    """Mostra PDFs locais ainda sem chunks gravados no índice Supabase."""
+    try:
+        # Só consideramos processado um arquivo que já tenha chunks no índice.
+        summary = db.get_ingestion_summary()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Não foi possível consultar a ingestão no Supabase.")
+
+    indexed_names = set(summary["arquivos_indexados"])
+    local_pdfs = [
+        name for name in os.listdir(settings.DOCS_DIR)
+        if name.lower().endswith(".pdf")
+        and os.path.isfile(os.path.join(settings.DOCS_DIR, name))
+    ] if os.path.exists(settings.DOCS_DIR) else []
+    pending_files = sorted(name for name in local_pdfs if name not in indexed_names)
+
+    return {
+        "files": pending_files,
+        "total_arquivos_locais": len(local_pdfs),
+        "total_documentos_vetorizados": summary["total_documentos_vetorizados"],
+        "total_chunks_vetorizados": summary["total_chunks_vetorizados"],
+    }
 
 @app.get("/api/documents")
 def list_documents():
@@ -59,12 +76,35 @@ def list_documents():
 
 @app.post("/api/ingest")
 def ingest_documents(req: IngestRequest):
-    files_to_process = []
+    # Descobre o que já foi vetorizado antes de iniciar qualquer ingestão.
+    try:
+        summary = db.get_ingestion_summary()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Não foi possível consultar a ingestão no Supabase.")
+
+    indexed_names = set(summary["arquivos_indexados"])
     if req.filename:
+        # Aceita apenas um nome de arquivo simples dentro da pasta documentos.
+        if os.path.basename(req.filename) != req.filename or not req.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="Informe apenas o nome de um arquivo PDF da pasta documentos.")
+        if not os.path.isfile(os.path.join(settings.DOCS_DIR, req.filename)):
+            raise HTTPException(status_code=404, detail="O PDF solicitado não foi encontrado na pasta documentos.")
+        if req.filename in indexed_names:
+            return {
+                "total_processados": 0,
+                "detalhes": [],
+                "mensagem": "Este documento já foi vetorizado.",
+                **summary,
+            }
         files_to_process = [req.filename]
     else:
         if os.path.exists(settings.DOCS_DIR):
-            files_to_process = [f for f in os.listdir(settings.DOCS_DIR) if f.lower().endswith(".pdf")]
+            files_to_process = [
+                name for name in os.listdir(settings.DOCS_DIR)
+                if name.lower().endswith(".pdf")
+                and os.path.isfile(os.path.join(settings.DOCS_DIR, name))
+                and name not in indexed_names
+            ]
     
     if not files_to_process:
         raise HTTPException(status_code=400, detail="Nenhum arquivo PDF encontrado para ingestão.")
@@ -81,9 +121,11 @@ def ingest_documents(req: IngestRequest):
                 "erro": str(e)
             })
 
+    updated_summary = db.get_ingestion_summary()
     return {
         "total_processados": len(results),
-        "detalhes": results
+        "detalhes": results,
+        **updated_summary,
     }
 
 @app.post("/api/query")
@@ -94,8 +136,8 @@ def execute_query(req: QueryRequest):
     try:
         resultado = rag_service.query_rag(
             question=req.pergunta,
-            top_k=req.top_k or 5,
-            min_threshold=req.min_threshold or 0.35
+            top_k=req.top_k,
+            min_threshold=req.min_threshold
         )
         return resultado
     except Exception as e:
